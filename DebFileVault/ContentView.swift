@@ -24,12 +24,6 @@ struct ContentView: View {
             appState.lock()
         }
         .onContinuousHover { _ in appState.resetIdleTimer() }
-        .onAppear {
-            // Give AppDelegate a reference to AppState for file-open handling
-            if let delegate = NSApp.delegate as? AppDelegate {
-                delegate.appState = appState
-            }
-        }
     }
 
     private var vaultView: some View {

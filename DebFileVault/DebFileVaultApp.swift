@@ -16,6 +16,8 @@ struct DebFileVaultApp: App {
             ContentView()
                 .environment(appState)
                 .task {
+                    // Wire AppDelegate immediately so file-open events work before first view appears
+                    appDelegate.appState = appState
                     // One-time migration: remove legacy UserDefaults vault keys from previous version
                     let legacyKeys = [
                         "com.debprakash.DebFileVault.vaultSalt",
@@ -25,9 +27,9 @@ struct DebFileVaultApp: App {
                     for key in legacyKeys {
                         UserDefaults.standard.removeObject(forKey: key)
                     }
-
                     // Auto-open the last vault on launch (skip the picker if path still exists)
                     if let url = VaultManager.loadLastVaultURL() {
+                        // If the vault no longer exists or is corrupt, silently fall through to the picker
                         try? appState.openVault(at: url)
                     }
                 }
@@ -53,7 +55,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let url = urls.first else { return }
         Task { @MainActor in
-            try? appState?.openVault(at: url)
+            do {
+                try appState?.openVault(at: url)
+            } catch {
+                let alert = NSAlert()
+                alert.messageText = "Could not open vault"
+                alert.informativeText = error.localizedDescription
+                alert.alertStyle = .warning
+                alert.runModal()
+            }
         }
     }
 

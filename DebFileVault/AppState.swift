@@ -27,17 +27,18 @@ final class AppState {
     func createVault(at url: URL, password: String) async throws {
         let container = try VaultManager.openContainer(at: url)
 
-        let (key, metadata) = try await Task.detached(priority: .userInitiated) {
-            let salt = EncryptionService.generateSalt()
+        let (key, salt, ciphertext, nonce) = try await Task.detached(priority: .userInitiated) {
+            let salt = try EncryptionService.generateSalt()
             let key = try EncryptionService.deriveKey(password: password, salt: salt)
             guard let sentinelData = sentinelPlaintext.data(using: .utf8) else {
                 throw EncryptionError.encryptionFailed
             }
             let (ciphertext, nonce) = try EncryptionService.encrypt(sentinelData, key: key)
-            let metadata = VaultMetadata(salt: salt, sentinelCiphertext: ciphertext, sentinelNonce: nonce)
-            return (key, metadata)
+            return (key, salt, ciphertext, nonce)
         }.value
 
+        // Construct VaultMetadata on MainActor — @Model objects must not be created off-actor
+        let metadata = VaultMetadata(salt: salt, sentinelCiphertext: ciphertext, sentinelNonce: nonce)
         let context = ModelContext(container)
         context.insert(metadata)
         try context.save()
@@ -104,7 +105,7 @@ final class AppState {
 
     // MARK: - Idle Timer
 
-    private var idleTimer: Timer?
+    private var idleTimerTask: Task<Void, Never>?
     private let idleTimeoutSeconds: TimeInterval = 5 * 60
 
     func resetIdleTimer() {
@@ -114,15 +115,16 @@ final class AppState {
     }
 
     private func startIdleTimer() {
-        idleTimer = Timer.scheduledTimer(withTimeInterval: idleTimeoutSeconds, repeats: false) { [weak self] _ in
-            guard let self else { return }
-            self.lock()
+        idleTimerTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(self?.idleTimeoutSeconds ?? 300))
+            guard !Task.isCancelled else { return }
+            await MainActor.run { self?.lock() }
         }
     }
 
     private func cancelIdleTimer() {
-        idleTimer?.invalidate()
-        idleTimer = nil
+        idleTimerTask?.cancel()
+        idleTimerTask = nil
     }
 
     // MARK: - Convenience

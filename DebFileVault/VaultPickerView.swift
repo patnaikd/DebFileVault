@@ -16,7 +16,7 @@ struct VaultPickerView: View {
     @State private var errorMessage: String? = nil
     @State private var isWorking = false
 
-    private var lastVaultURL: URL? { VaultManager.loadLastVaultURL() }
+    @State private var lastVaultURL: URL? = nil
 
     var body: some View {
         VStack(spacing: 32) {
@@ -42,6 +42,9 @@ struct VaultPickerView: View {
         }
         .padding(40)
         .frame(minWidth: 420, minHeight: 460)
+        .onAppear {
+            lastVaultURL = VaultManager.loadLastVaultURL()
+        }
     }
 
     // MARK: - Picker Buttons
@@ -165,9 +168,10 @@ struct VaultPickerView: View {
         }
         errorMessage = nil
         isWorking = true
-        Task {
+        Task { @MainActor in
             do {
                 try await appState.createVault(at: url, password: createPassword)
+                isWorking = false
             } catch {
                 errorMessage = error.localizedDescription
                 isWorking = false

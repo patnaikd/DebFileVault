@@ -35,7 +35,7 @@ struct EncryptionService {
     // NOTE: Memory zeroing of the derived SymmetricKey is not guaranteed by Swift value types.
     // Setting vaultKey = nil releases the reference; the OS allocator reclaims the memory
     // but does not guarantee zeroing. This is a known Swift limitation for key material.
-    nonisolated(unsafe) static let pbkdf2Iterations = 310_000
+    static let pbkdf2Iterations = 310_000
 
     // MARK: - Key Derivation
 
@@ -67,9 +67,10 @@ struct EncryptionService {
     // MARK: - Salt Generation
 
     /// Generates a cryptographically random 16-byte salt.
-    static nonisolated func generateSalt() -> Data {
+    static nonisolated func generateSalt() throws -> Data {
         var bytes = [UInt8](repeating: 0, count: 16)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard status == errSecSuccess else { throw EncryptionError.keyDerivationFailed }
         return Data(bytes)
     }
 
