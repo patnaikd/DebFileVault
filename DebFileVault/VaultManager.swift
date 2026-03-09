@@ -27,6 +27,7 @@ struct VaultManager {
     static let fileExtension = "debfilevault"
 
     /// Creates a ModelContainer backed by a .debfilevault file at the given URL.
+    /// The caller must have already called `url.startAccessingSecurityScopedResource()`.
     static nonisolated func openContainer(at url: URL) throws -> ModelContainer {
         let schema = Schema([Item.self, VaultMetadata.self])
         let config = ModelConfiguration(schema: schema, url: url)
@@ -37,20 +38,38 @@ struct VaultManager {
         }
     }
 
-    /// UserDefaults key for remembering the last opened vault path.
-    static let lastVaultURLKey = "com.debprakash.DebFileVault.lastVaultURL"
+    // MARK: - Security-Scoped Bookmark Persistence
 
+    static let lastVaultBookmarkKey = "com.debprakash.DebFileVault.lastVaultBookmark"
+
+    /// Saves a security-scoped bookmark for `url` so sandbox access survives relaunch.
     static func saveLastVaultURL(_ url: URL) {
-        UserDefaults.standard.set(url.path, forKey: lastVaultURLKey)
+        guard let bookmark = try? url.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) else { return }
+        UserDefaults.standard.set(bookmark, forKey: lastVaultBookmarkKey)
     }
 
+    /// Resolves the stored bookmark back to a URL and starts security-scoped access.
+    /// Returns `nil` if no bookmark is stored or the file no longer exists.
+    /// **Caller must call `url.stopAccessingSecurityScopedResource()` when done.**
     static func loadLastVaultURL() -> URL? {
-        guard let path = UserDefaults.standard.string(forKey: lastVaultURLKey) else { return nil }
-        let url = URL(fileURLWithPath: path)
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        guard let bookmark = UserDefaults.standard.data(forKey: lastVaultBookmarkKey) else { return nil }
+        var isStale = false
+        guard let url = try? URL(
+            resolvingBookmarkData: bookmark,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else { return nil }
+        if isStale { saveLastVaultURL(url) } // refresh stale bookmark
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
     }
 
     static func clearLastVaultURL() {
-        UserDefaults.standard.removeObject(forKey: lastVaultURLKey)
+        UserDefaults.standard.removeObject(forKey: lastVaultBookmarkKey)
     }
 }

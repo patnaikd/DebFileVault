@@ -22,6 +22,8 @@
             </dict>
         </dict>
     </array>
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2026 Debprakash Patnaik</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>

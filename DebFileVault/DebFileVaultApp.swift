@@ -22,14 +22,15 @@ struct DebFileVaultApp: App {
                     let legacyKeys = [
                         "com.debprakash.DebFileVault.vaultSalt",
                         "com.debprakash.DebFileVault.sentinelCiphertext",
-                        "com.debprakash.DebFileVault.sentinelNonce"
+                        "com.debprakash.DebFileVault.sentinelNonce",
+                        "com.debprakash.DebFileVault.lastVaultURL"  // replaced by bookmark
                     ]
                     for key in legacyKeys {
                         UserDefaults.standard.removeObject(forKey: key)
                     }
                     // Auto-open the last vault on launch (skip the picker if path still exists)
+                    // loadLastVaultURL() resolves the security-scoped bookmark; openVault calls startAccessing.
                     if let url = VaultManager.loadLastVaultURL() {
-                        // If the vault no longer exists or is corrupt, silently fall through to the picker
                         try? appState.openVault(at: url)
                     }
                 }

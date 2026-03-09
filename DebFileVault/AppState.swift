@@ -25,6 +25,12 @@ final class AppState {
 
     /// Creates a new .debfilevault file at `url`, sets up the password, and unlocks.
     func createVault(at url: URL, password: String) async throws {
+        // Remove any pre-existing (possibly corrupt) file before creating a fresh vault
+        let base = url.path
+        for path in [base, "\(base)-shm", "\(base)-wal"] {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+        _ = url.startAccessingSecurityScopedResource()
         let container = try VaultManager.openContainer(at: url)
 
         let (key, salt, ciphertext, nonce) = try await Task.detached(priority: .userInitiated) {
@@ -55,6 +61,7 @@ final class AppState {
 
     /// Opens an existing .debfilevault file. Does NOT unlock — call unlock(password:) after.
     func openVault(at url: URL) throws {
+        _ = url.startAccessingSecurityScopedResource()
         let container = try VaultManager.openContainer(at: url)
         currentVaultURL = url
         modelContainer = container
@@ -100,6 +107,9 @@ final class AppState {
     func closeVault() {
         lock()
         modelContainer = nil
+        if let url = currentVaultURL {
+            url.stopAccessingSecurityScopedResource()
+        }
         currentVaultURL = nil
     }
 
