@@ -24,7 +24,7 @@ struct LockScreenView: View {
             VStack(spacing: 12) {
                 Image(systemName: "lock.shield.fill")
                     .font(.system(size: 64))
-                    .foregroundStyle(.accentColor)
+                    .foregroundStyle(Color.accentColor)
                 Text("DebFileVault")
                     .font(.largeTitle)
                     .fontWeight(.bold)
