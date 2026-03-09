@@ -2,8 +2,6 @@
 //  ContentView.swift
 //  DebFileVault
 //
-//  Created by Debprakash Patnaik on 3/8/26.
-//
 
 import SwiftUI
 import SwiftData
@@ -14,26 +12,33 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if appState.isUnlocked {
-                vaultView
-            } else {
+            if !appState.hasOpenVault {
+                VaultPickerView()
+            } else if !appState.isUnlocked {
                 LockScreenView()
+            } else {
+                vaultView
             }
         }
-        // Lock when screen sleeps or system suspends
         .onReceive(NotificationCenter.default.publisher(for: AppDelegate.lockNotification)) { _ in
             appState.lock()
         }
-        // Reset idle timer on any mouse/keyboard activity in the window
         .onContinuousHover { _ in appState.resetIdleTimer() }
+        .onAppear {
+            // Give AppDelegate a reference to AppState for file-open handling
+            if let delegate = NSApp.delegate as? AppDelegate {
+                delegate.appState = appState
+            }
+        }
     }
-
-    // MARK: - Vault (unlocked)
 
     private var vaultView: some View {
         NavigationSplitView {
-            NoteListView(selectedItem: $selectedItem)
-                .navigationTitle("Notes")
+            if let container = appState.modelContainer {
+                NoteListView(selectedItem: $selectedItem)
+                    .modelContainer(container)
+                    .navigationTitle(appState.currentVaultURL?.deletingPathExtension().lastPathComponent ?? "Notes")
+            }
         } detail: {
             if let item = selectedItem {
                 NoteDetailView(item: item)
@@ -47,9 +52,7 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                Button {
-                    appState.lock()
-                } label: {
+                Button { appState.lock() } label: {
                     Label("Lock Vault", systemImage: "lock")
                 }
             }
