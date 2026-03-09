@@ -32,6 +32,7 @@ struct ContentView: View {
                 NoteListView(selectedItem: $selectedItem)
                     .modelContainer(container)
                     .navigationTitle(appState.currentVaultURL?.deletingPathExtension().lastPathComponent ?? "Notes")
+                    .navigationSubtitle(appState.currentVaultURL?.path(percentEncoded: false) ?? "")
             }
         } detail: {
             if let item = selectedItem {
