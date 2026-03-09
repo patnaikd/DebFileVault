@@ -2,23 +2,12 @@
 //  AppState.swift
 //  DebFileVault
 //
-//  Created by Debprakash Patnaik on 3/8/26.
-//
 
 import Foundation
 import CryptoKit
 import Observation
+import SwiftData
 
-// UserDefaults keys for vault metadata (none of this is secret)
-private enum VaultKeys {
-    static let salt = "com.debprakash.DebFileVault.vaultSalt"
-    static let sentinelCiphertext = "com.debprakash.DebFileVault.sentinelCiphertext"
-    static let sentinelNonce = "com.debprakash.DebFileVault.sentinelNonce"
-}
-
-// Fixed plaintext used to verify the correct password on unlock.
-// We encrypt this on first setup and attempt to decrypt on every subsequent unlock.
-// nonisolated(unsafe) because this is an immutable constant accessed from Task.detached.
 private nonisolated(unsafe) let sentinelPlaintext = "DebFileVault-v1"
 
 @MainActor
@@ -28,65 +17,66 @@ final class AppState {
     // MARK: - Public State
 
     private(set) var isUnlocked: Bool = false
-
-    // The derived AES-256 key, held in memory only while unlocked.
-    // NOTE: Swift value types do not guarantee memory zeroing on release;
-    // setting to nil drops the reference and allows ARC to reclaim it,
-    // but the underlying bytes may remain in process memory until overwritten.
-    // This is a known limitation of Swift for sensitive key material.
     private(set) var vaultKey: SymmetricKey? = nil
+    private(set) var currentVaultURL: URL? = nil
+    private(set) var modelContainer: ModelContainer? = nil
 
-    // MARK: - First-Launch Detection
+    // MARK: - Create New Vault
 
-    var isFirstLaunch: Bool {
-        UserDefaults.standard.data(forKey: VaultKeys.salt) == nil
-    }
+    /// Creates a new .debfilevault file at `url`, sets up the password, and unlocks.
+    func createVault(at url: URL, password: String) async throws {
+        let container = try VaultManager.openContainer(at: url)
 
-    // MARK: - Setup (First Launch)
-
-    /// Creates the vault with a new master password. Generates a salt, derives the key,
-    /// encrypts a sentinel blob for future password verification, and unlocks.
-    /// Key derivation runs off the main thread; state mutations happen on MainActor.
-    func setupVault(password: String) async throws {
-        // Run CPU-intensive PBKDF2 off the main thread
-        let (key, salt, ciphertext, nonce) = try await Task.detached(priority: .userInitiated) {
+        let (key, metadata) = try await Task.detached(priority: .userInitiated) {
             let salt = EncryptionService.generateSalt()
             let key = try EncryptionService.deriveKey(password: password, salt: salt)
             guard let sentinelData = sentinelPlaintext.data(using: .utf8) else {
                 throw EncryptionError.encryptionFailed
             }
             let (ciphertext, nonce) = try EncryptionService.encrypt(sentinelData, key: key)
-            return (key, salt, ciphertext, nonce)
+            let metadata = VaultMetadata(salt: salt, sentinelCiphertext: ciphertext, sentinelNonce: nonce)
+            return (key, metadata)
         }.value
 
-        // Persist salt and encrypted sentinel (neither is secret)
-        UserDefaults.standard.set(salt, forKey: VaultKeys.salt)
-        UserDefaults.standard.set(ciphertext, forKey: VaultKeys.sentinelCiphertext)
-        UserDefaults.standard.set(nonce, forKey: VaultKeys.sentinelNonce)
+        let context = ModelContext(container)
+        context.insert(metadata)
+        try context.save()
 
+        currentVaultURL = url
+        modelContainer = container
         vaultKey = key
         isUnlocked = true
+        VaultManager.saveLastVaultURL(url)
         startIdleTimer()
+    }
+
+    // MARK: - Open Existing Vault
+
+    /// Opens an existing .debfilevault file. Does NOT unlock — call unlock(password:) after.
+    func openVault(at url: URL) throws {
+        let container = try VaultManager.openContainer(at: url)
+        currentVaultURL = url
+        modelContainer = container
+        VaultManager.saveLastVaultURL(url)
     }
 
     // MARK: - Unlock
 
-    /// Unlocks the vault with the master password.
+    /// Unlocks the currently open vault with the master password.
     /// Throws CryptoKitError.authenticationFailure if the password is wrong.
-    /// Key derivation runs off the main thread; state mutations happen on MainActor.
     func unlock(password: String) async throws {
-        guard
-            let salt = UserDefaults.standard.data(forKey: VaultKeys.salt),
-            let sentinelCiphertext = UserDefaults.standard.data(forKey: VaultKeys.sentinelCiphertext),
-            let sentinelNonce = UserDefaults.standard.data(forKey: VaultKeys.sentinelNonce)
-        else {
-            throw EncryptionError.invalidData
-        }
+        guard let container = modelContainer else { throw VaultError.metadataNotFound }
 
-        // Run CPU-intensive PBKDF2 off the main thread
+        let context = ModelContext(container)
+        let metadata = try context.fetch(FetchDescriptor<VaultMetadata>()).first
+        guard let metadata else { throw VaultError.metadataNotFound }
+
+        let salt = metadata.salt
+        let sentinelCiphertext = metadata.sentinelCiphertext
+        let sentinelNonce = metadata.sentinelNonce
+
         let key = try await Task.detached(priority: .userInitiated) {
             let key = try EncryptionService.deriveKey(password: password, salt: salt)
-            // Throws CryptoKitError.authenticationFailure if the password is wrong
             _ = try EncryptionService.decrypt(sentinelCiphertext, nonce: sentinelNonce, key: key)
             return key
         }.value
@@ -98,19 +88,25 @@ final class AppState {
 
     // MARK: - Lock
 
-    /// Locks the vault, wiping the in-memory key.
     func lock() {
         vaultKey = nil
         isUnlocked = false
         cancelIdleTimer()
     }
 
+    // MARK: - Close Vault (return to picker)
+
+    func closeVault() {
+        lock()
+        modelContainer = nil
+        currentVaultURL = nil
+    }
+
     // MARK: - Idle Timer
 
     private var idleTimer: Timer?
-    private let idleTimeoutSeconds: TimeInterval = 5 * 60 // 5 minutes
+    private let idleTimeoutSeconds: TimeInterval = 5 * 60
 
-    /// Resets the idle timer. Call this on any user interaction.
     func resetIdleTimer() {
         guard isUnlocked else { return }
         cancelIdleTimer()
@@ -118,12 +114,8 @@ final class AppState {
     }
 
     private func startIdleTimer() {
-        idleTimer = Timer.scheduledTimer(
-            withTimeInterval: idleTimeoutSeconds,
-            repeats: false
-        ) { [weak self] _ in
+        idleTimer = Timer.scheduledTimer(withTimeInterval: idleTimeoutSeconds, repeats: false) { [weak self] _ in
             guard let self else { return }
-            // Timer fires on the main run loop; AppState is @MainActor, so this is safe.
             self.lock()
         }
     }
@@ -133,10 +125,7 @@ final class AppState {
         idleTimer = nil
     }
 
-    // MARK: - Vault Salt
+    // MARK: - Convenience
 
-    /// Returns the stored vault salt. Used by views when creating new encrypted items.
-    var vaultSalt: Data? {
-        UserDefaults.standard.data(forKey: VaultKeys.salt)
-    }
+    var hasOpenVault: Bool { modelContainer != nil }
 }
