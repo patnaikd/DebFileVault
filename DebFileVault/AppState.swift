@@ -18,7 +18,8 @@ private enum VaultKeys {
 
 // Fixed plaintext used to verify the correct password on unlock.
 // We encrypt this on first setup and attempt to decrypt on every subsequent unlock.
-private let sentinelPlaintext = "DebFileVault-v1"
+// nonisolated(unsafe) because this is an immutable constant accessed from Task.detached.
+private nonisolated(unsafe) let sentinelPlaintext = "DebFileVault-v1"
 
 @MainActor
 @Observable
@@ -121,9 +122,9 @@ final class AppState {
             withTimeInterval: idleTimeoutSeconds,
             repeats: false
         ) { [weak self] _ in
-            Task { @MainActor in
-                self?.lock()
-            }
+            guard let self else { return }
+            // Timer fires on the main run loop; AppState is @MainActor, so this is safe.
+            self.lock()
         }
     }
 
