@@ -9,51 +9,50 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @Environment(AppState.self) private var appState
+    @State private var selectedItem: Item? = nil
 
     var body: some View {
+        Group {
+            if appState.isUnlocked {
+                vaultView
+            } else {
+                LockScreenView()
+            }
+        }
+        // Lock when screen sleeps or system suspends
+        .onReceive(NotificationCenter.default.publisher(for: AppDelegate.lockNotification)) { _ in
+            appState.lock()
+        }
+        // Reset idle timer on any mouse/keyboard activity in the window
+        .onContinuousHover { _ in appState.resetIdleTimer() }
+    }
+
+    // MARK: - Vault (unlocked)
+
+    private var vaultView: some View {
         NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
-            }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-            .toolbar {
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
+            NoteListView(selectedItem: $selectedItem)
+                .navigationTitle("Notes")
         } detail: {
-            Text("Select an item")
+            if let item = selectedItem {
+                NoteDetailView(item: item)
+            } else {
+                ContentUnavailableView(
+                    "No Note Selected",
+                    systemImage: "note.text",
+                    description: Text("Select a note from the list or create a new one.")
+                )
+            }
         }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    appState.lock()
+                } label: {
+                    Label("Lock Vault", systemImage: "lock")
+                }
             }
         }
     }
-}
-
-#Preview {
-    ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
 }
