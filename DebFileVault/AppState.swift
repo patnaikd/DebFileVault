@@ -20,6 +20,7 @@ private enum VaultKeys {
 // We encrypt this on first setup and attempt to decrypt on every subsequent unlock.
 private let sentinelPlaintext = "DebFileVault-v1"
 
+@MainActor
 @Observable
 final class AppState {
 
@@ -44,15 +45,18 @@ final class AppState {
 
     /// Creates the vault with a new master password. Generates a salt, derives the key,
     /// encrypts a sentinel blob for future password verification, and unlocks.
-    func setupVault(password: String) throws {
-        let salt = EncryptionService.generateSalt()
-        let key = try EncryptionService.deriveKey(password: password, salt: salt)
-
-        // Encrypt sentinel for future unlock verification
-        guard let sentinelData = sentinelPlaintext.data(using: .utf8) else {
-            throw EncryptionError.encryptionFailed
-        }
-        let (ciphertext, nonce) = try EncryptionService.encrypt(sentinelData, key: key)
+    /// Key derivation runs off the main thread; state mutations happen on MainActor.
+    func setupVault(password: String) async throws {
+        // Run CPU-intensive PBKDF2 off the main thread
+        let (key, salt, ciphertext, nonce) = try await Task.detached(priority: .userInitiated) {
+            let salt = EncryptionService.generateSalt()
+            let key = try EncryptionService.deriveKey(password: password, salt: salt)
+            guard let sentinelData = sentinelPlaintext.data(using: .utf8) else {
+                throw EncryptionError.encryptionFailed
+            }
+            let (ciphertext, nonce) = try EncryptionService.encrypt(sentinelData, key: key)
+            return (key, salt, ciphertext, nonce)
+        }.value
 
         // Persist salt and encrypted sentinel (neither is secret)
         UserDefaults.standard.set(salt, forKey: VaultKeys.salt)
@@ -68,7 +72,8 @@ final class AppState {
 
     /// Unlocks the vault with the master password.
     /// Throws CryptoKitError.authenticationFailure if the password is wrong.
-    func unlock(password: String) throws {
+    /// Key derivation runs off the main thread; state mutations happen on MainActor.
+    func unlock(password: String) async throws {
         guard
             let salt = UserDefaults.standard.data(forKey: VaultKeys.salt),
             let sentinelCiphertext = UserDefaults.standard.data(forKey: VaultKeys.sentinelCiphertext),
@@ -77,10 +82,13 @@ final class AppState {
             throw EncryptionError.invalidData
         }
 
-        let key = try EncryptionService.deriveKey(password: password, salt: salt)
-
-        // This throws CryptoKitError.authenticationFailure if the password is wrong
-        _ = try EncryptionService.decrypt(sentinelCiphertext, nonce: sentinelNonce, key: key)
+        // Run CPU-intensive PBKDF2 off the main thread
+        let key = try await Task.detached(priority: .userInitiated) {
+            let key = try EncryptionService.deriveKey(password: password, salt: salt)
+            // Throws CryptoKitError.authenticationFailure if the password is wrong
+            _ = try EncryptionService.decrypt(sentinelCiphertext, nonce: sentinelNonce, key: key)
+            return key
+        }.value
 
         vaultKey = key
         isUnlocked = true
@@ -113,7 +121,9 @@ final class AppState {
             withTimeInterval: idleTimeoutSeconds,
             repeats: false
         ) { [weak self] _ in
-            self?.lock()
+            Task { @MainActor in
+                self?.lock()
+            }
         }
     }
 
@@ -122,9 +132,9 @@ final class AppState {
         idleTimer = nil
     }
 
-    // MARK: - Vault Salt (for encrypting new items)
+    // MARK: - Vault Salt
 
-    /// Returns the stored vault salt. Used by views to encrypt new item content.
+    /// Returns the stored vault salt. Used by views when creating new encrypted items.
     var vaultSalt: Data? {
         UserDefaults.standard.data(forKey: VaultKeys.salt)
     }
