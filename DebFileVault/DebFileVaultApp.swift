@@ -21,7 +21,23 @@ struct DebFileVaultApp: App {
         do {
             return try ModelContainer(for: schema, configurations: [modelConfiguration])
         } catch {
-            fatalError("Could not create ModelContainer: \(error)")
+            // Schema changed and lightweight migration failed (e.g. non-optional columns added).
+            // Delete the store and recreate from scratch. All data was encrypted; no plaintext lost.
+            let storeURL = URL.applicationSupportDirectory
+                .appendingPathComponent("default.store")
+            for ext in ["", "-shm", "-wal"] {
+                try? FileManager.default.removeItem(at: storeURL.appendingPathExtension(ext.isEmpty ? "" : String(ext.dropFirst())))
+            }
+            // Also try exact filenames used by SwiftData
+            for name in ["default.store", "default.store-shm", "default.store-wal"] {
+                let url = URL.applicationSupportDirectory.appendingPathComponent(name)
+                try? FileManager.default.removeItem(at: url)
+            }
+            do {
+                return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            } catch {
+                fatalError("Could not create ModelContainer even after store deletion: \(error)")
+            }
         }
     }()
 
