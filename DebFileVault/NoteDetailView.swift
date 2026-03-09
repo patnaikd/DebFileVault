@@ -62,9 +62,16 @@ struct NoteDetailView: View {
 
                 // Metadata footer
                 Divider()
-                HStack(spacing: 16) {
-                    Label("Created \(item.createdAt.formatted(date: .abbreviated, time: .shortened))", systemImage: "calendar")
-                    Label("Modified \(item.modifiedAt.formatted(date: .abbreviated, time: .shortened))", systemImage: "pencil")
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 16) {
+                        Label("Created \(item.createdAt.formatted(date: .abbreviated, time: .shortened))", systemImage: "calendar")
+                        Label("Modified \(item.modifiedAt.formatted(date: .abbreviated, time: .shortened))", systemImage: "pencil")
+                    }
+                    if let url = appState.currentVaultURL {
+                        Label(url.path(percentEncoded: false), systemImage: "externaldrive")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

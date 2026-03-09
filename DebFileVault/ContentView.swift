@@ -24,6 +24,28 @@ struct ContentView: View {
             appState.lock()
         }
         .onContinuousHover { _ in appState.resetIdleTimer() }
+        .onChange(of: appState.isUnlocked) { _, unlocked in
+            if !unlocked { selectedItem = nil }
+        }
+        .onChange(of: appState.hasOpenVault) { _, hasVault in
+            if !hasVault { selectedItem = nil }
+        }
+        .onChange(of: appState.currentVaultURL) { _, url in
+            updateWindowTitle(url: url)
+        }
+        .onAppear {
+            updateWindowTitle(url: appState.currentVaultURL)
+        }
+    }
+
+    private func updateWindowTitle(url: URL?) {
+        if let url {
+            let name = url.deletingPathExtension().lastPathComponent
+            let path = url.deletingLastPathComponent().path(percentEncoded: false)
+            NSApp.mainWindow?.title = "\(name) — \(path)"
+        } else {
+            NSApp.mainWindow?.title = "DebFileVault"
+        }
     }
 
     private var vaultView: some View {
@@ -32,7 +54,6 @@ struct ContentView: View {
                 NoteListView(selectedItem: $selectedItem)
                     .modelContainer(container)
                     .navigationTitle(appState.currentVaultURL?.deletingPathExtension().lastPathComponent ?? "Notes")
-                    .navigationSubtitle(appState.currentVaultURL?.path(percentEncoded: false) ?? "")
             }
         } detail: {
             if let item = selectedItem {
