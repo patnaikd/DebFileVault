@@ -12,7 +12,7 @@ import CryptoKit
 struct NoteListView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppState.self) private var appState
-    @Query(sort: \Item.modifiedAt, order: .reverse) private var items: [Item]
+    @Query(sort: \Item.createdAt, order: .reverse) private var items: [Item]
 
     @Binding var selectedItem: Item?
 
@@ -83,7 +83,7 @@ private struct NoteRowView: View {
                 .font(.body)
                 .fontWeight(.medium)
                 .lineLimit(1)
-            Text(item.modifiedAt.formatted(date: .abbreviated, time: .shortened))
+            Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
