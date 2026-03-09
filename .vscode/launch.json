@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:DebFileVault}",
+            "name": "Debug DebFileVaultApp",
+            "target": "DebFileVaultApp",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug DebFileVaultApp"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:DebFileVault}",
+            "name": "Release DebFileVaultApp",
+            "target": "DebFileVaultApp",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release DebFileVaultApp"
+        }
+    ]
+}
